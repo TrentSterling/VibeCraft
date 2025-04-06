@@ -1,1 +1,433 @@
-<h1>vibecraft!</h1>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeCraft</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.rawgit.com/mrdoob/three.js/r128/examples/js/controls/PointerLockControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; cursor: pointer; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background-color: rgba(0,0,0,0.6);
+            padding: 16px;
+            border-radius: 10px;
+            z-index: 100;
+            font-size: 24px;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background-color: white;
+            border: 2px solid black;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 99;
+            display: none;
+        }
+        #instructions {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-family: sans-serif;
+            font-size: 48px;
+            text-align: center;
+            z-index: 101;
+            cursor: pointer;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #instructions > div {
+           margin-bottom: 15px;
+        }
+        #instructions > div:last-child {
+           margin-bottom: 0;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        <div style="font-size: 72px; margin-bottom: 20px;">VibeCraft</div>
+        <div style="font-size: 28px; margin-bottom: 10px; color: #eee;">Vibecoded by Trent Sterling and Gemini 2.5, April 6th 2025</div>
+        <div style="font-size: 24px; margin-bottom: 50px; font-style: italic; color: #ccc;">vanilla JS terrain chunker, uses webworkers for performance</div>
+        <div>Click to Play</div>
+        <div style="font-size: 32px; margin-top: 20px;">(W, A, S, D = Move | Space = Jump/Up | Shift = Down | Mouse = Look | F = Toggle Fly | ESC = Unlock)</div>
+    </div>
+    <div id="crosshair"></div>
+    <div id="info">Loading...</div>
+
+    <script>
+    const providedNoiseCode = `
+(function(global){
+  var module = global.noise = {};
+
+  function Grad(x, y, z) {
+    this.x = x; this.y = y; this.z = z;
+  }
+
+  Grad.prototype.dot2 = function(x, y) {
+    return this.x*x + this.y*y;
+  };
+
+  Grad.prototype.dot3 = function(x, y, z) {
+    return this.x*x + this.y*y + this.z*z;
+  };
+
+  var grad3 = [new Grad(1,1,0),new Grad(-1,1,0),new Grad(1,-1,0),new Grad(-1,-1,0),
+               new Grad(1,0,1),new Grad(-1,0,1),new Grad(1,0,-1),new Grad(-1,0,-1),
+               new Grad(0,1,1),new Grad(0,-1,1),new Grad(0,1,-1),new Grad(0,-1,-1)];
+
+  var p = [151,160,137,91,90,15,
+  131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
+  190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
+  88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
+  77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
+  102,143,54, 65,25,63,161, 1,216,80,73,209,76,132,187,208, 89,18,169,200,196,
+  135,130,116,188,159,86,164,100,109,198,173,186, 3,64,52,217,226,250,124,123,
+  5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
+  223,183,170,213,119,248,152, 2,44,154,163, 70,221,153,101,155,167, 43,172,9,
+  129,22,39,253, 19,98,108,110,79,113,224,232,178,185, 112,104,218,246,97,228,
+  251,34,242,193,238,210,144,12,191,179,162,241, 81,51,145,235,249,14,239,107,
+  49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
+  138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180];
+  var perm = new Array(512);
+  var gradP = new Array(512);
+
+  module.seed = function(seed) {
+    if(seed > 0 && seed < 1) { seed *= 65536; }
+    seed = Math.floor(seed);
+    if(seed < 256) { seed |= seed << 8; }
+    for(var i = 0; i < 256; i++) {
+      var v;
+      if (i & 1) { v = p[i] ^ (seed & 255); } else { v = p[i] ^ ((seed>>8) & 255); }
+      perm[i] = perm[i + 256] = v;
+      gradP[i] = gradP[i + 256] = grad3[v % 12];
+    }
+  };
+
+  module.seed(0);
+
+  var F2 = 0.5*(Math.sqrt(3)-1); var G2 = (3-Math.sqrt(3))/6;
+  var F3 = 1/3; var G3 = 1/6;
+
+  module.simplex2 = function(xin, yin) {
+    var n0, n1, n2; var s = (xin+yin)*F2; var i = Math.floor(xin+s); var j = Math.floor(yin+s);
+    var t = (i+j)*G2; var x0 = xin-i+t; var y0 = yin-j+t;
+    var i1, j1; if(x0>y0) { i1=1; j1=0; } else { i1=0; j1=1; }
+    var x1 = x0 - i1 + G2; var y1 = y0 - j1 + G2;
+    var x2 = x0 - 1 + 2 * G2; var y2 = y0 - 1 + 2 * G2;
+    i &= 255; j &= 255;
+    var gi0 = gradP[i+perm[j]]; var gi1 = gradP[i+i1+perm[j+j1]]; var gi2 = gradP[i+1+perm[j+1]];
+    var t0 = 0.5 - x0*x0-y0*y0; if(t0<0) { n0 = 0; } else { t0 *= t0; n0 = t0 * t0 * gi0.dot2(x0, y0); }
+    var t1 = 0.5 - x1*x1-y1*y1; if(t1<0) { n1 = 0; } else { t1 *= t1; n1 = t1 * t1 * gi1.dot2(x1, y1); }
+    var t2 = 0.5 - x2*x2-y2*y2; if(t2<0) { n2 = 0; } else { t2 *= t2; n2 = t2 * t2 * gi2.dot2(x2, y2); }
+    return 70 * (n0 + n1 + n2);
+  };
+
+  module.simplex3 = function(xin, yin, zin) {
+    var n0, n1, n2, n3; var s = (xin+yin+zin)*F3; var i = Math.floor(xin+s); var j = Math.floor(yin+s); var k = Math.floor(zin+s);
+    var t = (i+j+k)*G3; var x0 = xin-i+t; var y0 = yin-j+t; var z0 = zin-k+t;
+    var i1, j1, k1; var i2, j2, k2;
+    if(x0>=y0){ if(y0>=z0){ i1=1;j1=0;k1=0; i2=1;j2=1;k2=0; } else if(x0>=z0){ i1=1;j1=0;k1=0; i2=1;j2=0;k2=1; } else { i1=0;j1=0;k1=1; i2=1;j2=0;k2=1; }}
+    else { if(y0<z0){ i1=0;j1=0;k1=1; i2=0;j2=1;k2=1; } else if(x0<z0){ i1=0;j1=1;k1=0; i2=0;j2=1;k2=1; } else { i1=0;j1=1;k1=0; i2=1;j2=1;k2=0; }}
+    var x1=x0-i1+G3; var y1=y0-j1+G3; var z1=z0-k1+G3;
+    var x2=x0-i2+2*G3; var y2=y0-j2+2*G3; var z2=z0-k2+2*G3;
+    var x3=x0-1+3*G3; var y3=y0-1+3*G3; var z3=z0-1+3*G3;
+    i&=255; j&=255; k&=255;
+    var gi0 = gradP[i+perm[j+perm[k]]]; var gi1 = gradP[i+i1+perm[j+j1+perm[k+k1]]]; var gi2 = gradP[i+i2+perm[j+j2+perm[k+k2]]]; var gi3 = gradP[i+1+perm[j+1+perm[k+1]]];
+    var t0 = 0.6 - x0*x0 - y0*y0 - z0*z0; if(t0<0) n0=0; else { t0*=t0; n0 = t0*t0*gi0.dot3(x0, y0, z0); }
+    var t1 = 0.6 - x1*x1 - y1*y1 - z1*z1; if(t1<0) n1=0; else { t1*=t1; n1 = t1*t1*gi1.dot3(x1, y1, z1); }
+    var t2 = 0.6 - x2*x2 - y2*y2 - z2*z2; if(t2<0) n2=0; else { t2*=t2; n2 = t2*t2*gi2.dot3(x2, y2, z2); }
+    var t3 = 0.6 - x3*x3 - y3*y3 - z3*z3; if(t3<0) n3=0; else { t3*=t3; n3 = t3*t3*gi3.dot3(x3, y3, z3); }
+    return 32 * (n0 + n1 + n2 + n3);
+  };
+
+  function fade(t) { return t*t*t*(t*(t*6-15)+10); }
+  function lerp(a, b, t) { return (1-t)*a + t*b; }
+
+  module.perlin2 = function(x, y) {
+    var X = Math.floor(x), Y = Math.floor(y); x=x-X; y=y-Y; X=X&255; Y=Y&255;
+    var n00 = gradP[X+perm[Y]].dot2(x, y); var n01 = gradP[X+perm[Y+1]].dot2(x, y-1);
+    var n10 = gradP[X+1+perm[Y]].dot2(x-1, y); var n11 = gradP[X+1+perm[Y+1]].dot2(x-1, y-1);
+    var u = fade(x);
+    return lerp(lerp(n00, n10, u), lerp(n01, n11, u), fade(y));
+  };
+
+  module.perlin3 = function(x, y, z) {
+    var X=Math.floor(x), Y=Math.floor(y), Z=Math.floor(z); x=x-X; y=y-Y; z=z-Z; X&=255; Y&=255; Z&=255;
+    var n000 = gradP[X+perm[Y+perm[Z]]].dot3(x,y,z); var n001 = gradP[X+perm[Y+perm[Z+1]]].dot3(x,y,z-1);
+    var n010 = gradP[X+perm[Y+1+perm[Z]]].dot3(x,y-1,z); var n011 = gradP[X+perm[Y+1+perm[Z+1]]].dot3(x,y-1,z-1);
+    var n100 = gradP[X+1+perm[Y+perm[Z]]].dot3(x-1,y,z); var n101 = gradP[X+1+perm[Y+perm[Z+1]]].dot3(x-1,y,z-1);
+    var n110 = gradP[X+1+perm[Y+1+perm[Z]]].dot3(x-1,y-1,z); var n111 = gradP[X+1+perm[Y+1+perm[Z+1]]].dot3(x-1,y-1,z-1);
+    var u=fade(x), v=fade(y), w=fade(z);
+    return lerp( lerp( lerp(n000,n100,u), lerp(n001,n101,u), w ), lerp( lerp(n010,n110,u), lerp(n011,n111,u), w ), v );
+  };
+
+})(this);
+`;
+
+    document.addEventListener('DOMContentLoaded', () => {
+
+        try {
+             (function(){ eval.call(window, providedNoiseCode); }).call(window);
+         } catch (e) {
+             console.error("Error executing embedded SimplexNoise on main thread:", e);
+             alert("Fatal Error: Could not execute noise library.");
+             throw e;
+         }
+
+        if(typeof THREE==='undefined'||THREE.REVISION!=='128'){alert('THREE fail');throw new Error('THREE fail');}
+        if(typeof THREE.PointerLockControls==='undefined'){alert('PLC fail');throw new Error('PLC fail');}
+         if (typeof window.noise === 'undefined' || typeof window.noise.simplex2 === 'undefined') {
+             alert('Embedded Noise Classic fail');throw new Error('Embedded Noise fail');
+         }
+
+        const CHUNK_SIZE=16; const CHUNK_HEIGHT=256; const RENDER_DISTANCE=8; const BLOCK_SIZE=1; const MAX_QUEUE_SIZE=150; const MAX_LOADED_CHUNKS=Math.pow(RENDER_DISTANCE*2+1,2)*1.5; const PLAYER_HEIGHT=1.8*BLOCK_SIZE; const PLAYER_SPEED=80.0*BLOCK_SIZE; const PLAYER_FLY_SPEED=400.0*BLOCK_SIZE; const PLAYER_ACCELERATION=600.0*BLOCK_SIZE; const PLAYER_FRICTION=8.0; const FLY_VERTICAL_SPEED=200.0*BLOCK_SIZE; const FLY_VERTICAL_FRICTION=5.0; const GRAVITY=25.0*BLOCK_SIZE; const JUMP_VELOCITY=9.0*BLOCK_SIZE; const NUM_WORKERS=Math.max(1, Math.min(navigator.hardwareConcurrency||4,4)); const MAX_ACTIVE_WORKER_JOBS=NUM_WORKERS*2; const MAX_UNLOAD_PER_FRAME=5;
+        const GROUND_BUFFER = 0.05 * BLOCK_SIZE;
+        const DAY_CYCLE_SPEED = (Math.PI * 2) / 10;
+        const BASE_DIR_LIGHT_INTENSITY = 0.6;
+        const BASE_HEMI_LIGHT_INTENSITY = 0.9;
+        const MIN_LIGHT_INTENSITY_FACTOR = 0.1;
+        const BASE_SKY_COLOR = new THREE.Color(0x87CEEB);
+        const NIGHT_SKY_COLOR = new THREE.Color(0x050515);
+
+        const scene=new THREE.Scene(); scene.background=BASE_SKY_COLOR.clone(); const viewDistWorld=RENDER_DISTANCE*CHUNK_SIZE*BLOCK_SIZE;
+        scene.fog=new THREE.Fog(BASE_SKY_COLOR.getHex(),viewDistWorld*0.4,viewDistWorld);
+        const camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight, 0.01, viewDistWorld*1.5);
+        camera.position.set(CHUNK_SIZE/2 * BLOCK_SIZE, 150 * BLOCK_SIZE, CHUNK_SIZE/2 * BLOCK_SIZE);
+        camera.rotation.x = -Math.PI / 2;
+
+        const renderer=new THREE.WebGLRenderer({antialias:false,}); renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(window.innerWidth,window.innerHeight); renderer.shadowMap.enabled=false; document.body.appendChild(renderer.domElement);
+        const hemisphereLight = new THREE.HemisphereLight(0xffeeff,0x777788, BASE_HEMI_LIGHT_INTENSITY);
+        scene.add(hemisphereLight);
+        const directionalLight=new THREE.DirectionalLight(0xffffff, BASE_DIR_LIGHT_INTENSITY);
+        directionalLight.position.set(0.8,1,0.6).normalize(); directionalLight.castShadow=false; scene.add(directionalLight);
+
+        const controls = new THREE.PointerLockControls(camera, document.body); scene.add(controls.getObject()); const instructionsDiv = document.getElementById('instructions'); const crosshairDiv = document.getElementById('crosshair'); instructionsDiv.addEventListener('click', function () { controls.lock(); }); controls.addEventListener('lock', function () { instructionsDiv.style.display = 'none'; crosshairDiv.style.display = 'block'; pointerLocked = true; }); controls.addEventListener('unlock', function () { instructionsDiv.style.display = 'flex'; crosshairDiv.style.display = 'none'; pointerLocked = false; movement.forward=movement.backward=movement.left=movement.right=movement.up=movement.down=false; });
+
+        const loadedChunks = new Map(); const chunkLoadRequestQueue = []; const chunkUnloadRequestQueue = []; let activeWorkerJobs = 0; let lastChunkX = Infinity; let lastChunkZ = Infinity; let lastFrameTime = performance.now(); let fps = 0; let frameCounter = 0;
+        let isFlying = true;
+        const movement = { forward: false, backward: false, left: false, right: false, up: false, down: false }; let pointerLocked = false; const playerVelocity = new THREE.Vector3(); let canJump = false; let onGround = false;
+        let sunAngle = Math.PI / 3;
+
+        document.addEventListener('keydown', onKeyDown); document.addEventListener('keyup', onKeyUp); function onKeyDown(event) { if (!pointerLocked && event.code !== 'Escape') return; switch(event.code) { case 'KeyW': movement.forward = true; break; case 'KeyS': movement.backward = true; break; case 'KeyA': movement.left = true; break; case 'KeyD': movement.right = true; break; case 'Space': movement.up = true; break; case 'ShiftLeft': movement.down = true; break; case 'KeyF': if (pointerLocked) { isFlying = !isFlying; console.log("Fly Mode:", isFlying); if (!isFlying) { onGround = false; } else { playerVelocity.y *= 0.1; } } break; case 'Escape': if (pointerLocked) { controls.unlock(); } break;} } function onKeyUp(event) { switch(event.code) { case 'KeyW': movement.forward = false; break; case 'KeyS': movement.backward = false; break; case 'KeyA': movement.left = false; break; case 'KeyD': movement.right = false; break; case 'Space': movement.up = false; break; case 'ShiftLeft': movement.down = false; break; } }
+
+        const mat_grass = new THREE.MeshLambertMaterial({ color: 0x559944 }); const mat_dirt = new THREE.MeshLambertMaterial({ color: 0x8B4513 }); const mat_stone = new THREE.MeshLambertMaterial({ color: 0x808080 }); const chunkSharedMaterials = [mat_grass, mat_dirt, mat_stone];
+        const noise2DMain = window.noise.simplex2;
+        function getTerrainHeight(worldX, worldZ) { const scale1=0.01, scale2=0.05, scale3=0.2, baseHeight=10, terrainAmp=60; const e = (noise2DMain(worldX*scale1, worldZ*scale1))*0.6+(noise2DMain(worldX*scale2, worldZ*scale2))*0.3+(noise2DMain(worldX*scale3, worldZ*scale3))*0.1; return Math.max(1, Math.floor((e*0.5+0.5)*terrainAmp + baseHeight)); }
+
+        const workerPool = []; const workerState = [];
+        function createWorkerCode() { return ` ${providedNoiseCode} const CHUNK_SIZE = ${CHUNK_SIZE}; const CHUNK_HEIGHT = ${CHUNK_HEIGHT}; const BLOCK_SIZE = ${BLOCK_SIZE}; let noise2DWorker; try { if (typeof self.noise === 'undefined' || typeof self.noise.simplex2 !== 'function') { throw new Error("Worker failed to create self.noise object or simplex2 function!"); } noise2DWorker = self.noise.simplex2; } catch (e) { console.error('Worker: FAILED to initialize embedded classic noise!', e); self.postMessage({ type: 'error', message: 'Worker noise init FAILED: ' + e.message }); } function getTerrainHeight(wx, wz) { if (!noise2DWorker) return 0; const s1=0.01,s2=0.05,s3=0.2,b=10,a=60; const e=(noise2DWorker(wx*s1,wz*s1))*0.6+(noise2DWorker(wx*s2,wz*s2))*0.3+(noise2DWorker(wx*s3,wz*s3))*0.1; return Math.max(1,Math.floor((e*0.5+0.5)*a+b)); } function getBlockMaterialIndex(wx,wy,wz){ if(wy<0||wy>=CHUNK_HEIGHT)return -1; const h=getTerrainHeight(wx,wz); if(!noise2DWorker && h===0) return 2; if(wy>h)return -1; if(wy===h)return 0; if(wy>=h-2)return 1; return 2;} function generateChunkGeometryData(cX,cZ){if(!noise2DWorker){console.error("Worker: Cannot mesh, noise2DWorker unavailable."); return null;} const geoData={0:{p:[],n:[],i:[]},1:{p:[],n:[],i:[]},2:{p:[],n:[],i:[]}}; let vCnt={0:0,1:0,2:0}; const sX=cX*CHUNK_SIZE*BLOCK_SIZE;const sZ=cZ*CHUNK_SIZE*BLOCK_SIZE; const getH=(()=>{const c={}; return(wx,wz)=>{const k=\`\${wx},\${wz}\`; return k in c ? c[k]:(c[k]=getTerrainHeight(wx,wz));}})(); const getM=(wx,wy,wz)=>{if(wy<0||wy>=CHUNK_HEIGHT)return -1;const h=getH(wx,wz); if(wy>h)return -1; if(wy===h)return 0; if(wy>=h-2)return 1; return 2;}; for(let y=0;y<CHUNK_HEIGHT;y++){for(let z=0;z<CHUNK_SIZE;z++){for(let x=0;x<CHUNK_SIZE;x++){ const wx=sX+x*BLOCK_SIZE;const wy=y*BLOCK_SIZE;const wz=sZ+z*BLOCK_SIZE; const mIdx=getM(wx,wy,wz); if(mIdx===-1) continue; const px=x*BLOCK_SIZE+BLOCK_SIZE/2,nx=x*BLOCK_SIZE-BLOCK_SIZE/2,py=y*BLOCK_SIZE+BLOCK_SIZE/2,ny=y*BLOCK_SIZE-BLOCK_SIZE/2,pz=z*BLOCK_SIZE+BLOCK_SIZE/2,nz=z*BLOCK_SIZE-BLOCK_SIZE/2; const faces = [{d:[1,0,0],C:[[px,py,nz],[px,py,pz],[px,ny,pz],[px,ny,nz]],N:[wx+BLOCK_SIZE,wy,wz]}, {d:[-1,0,0],C:[[nx,py,pz],[nx,py,nz],[nx,ny,nz],[nx,ny,pz]],N:[wx-BLOCK_SIZE,wy,wz]}, {d:[0,1,0],C:[[nx,py,pz],[px,py,pz],[px,py,nz],[nx,py,nz]],N:[wx,wy+BLOCK_SIZE,wz]}, {d:[0,-1,0],C:[[nx,ny,nz],[px,ny,nz],[px,ny,pz],[nx,ny,pz]],N:[wx,wy-BLOCK_SIZE,wz]}, {d:[0,0,1],C:[[px,py,pz],[nx,py,pz],[nx,ny,pz],[px,ny,pz]],N:[wx,wy,wz+BLOCK_SIZE]}, {d:[0,0,-1],C:[[nx,py,nz],[px,py,nz],[px,ny,nz],[nx,ny,nz]],N:[wx,wy,wz-BLOCK_SIZE]} ]; for(const{d:dir,C:corners,N:neighbor} of faces){if(getM(neighbor[0],neighbor[1],neighbor[2])===-1){const geo=geoData[mIdx];const vIdx=vCnt[mIdx]; for(const[vx,vy,vz] of corners){geo.p.push(vx,vy,vz);geo.n.push(dir[0],dir[1],dir[2]);}geo.i.push(vIdx,vIdx+1,vIdx+2,vIdx,vIdx+2,vIdx+3);vCnt[mIdx]+=4;}}}}}const fP=[],fN=[],fI=[],fG=[];let cVO=0;for(let matIdx=0;matIdx<3;matIdx++){const geo=geoData[matIdx];if(geo.p.length>0){fP.push(...geo.p);fN.push(...geo.n);const iStart=fI.length;for(const idx of geo.i){fI.push(idx+cVO);}fG.push({start:iStart,count:geo.i.length,materialIndex:matIdx});cVO+=vCnt[matIdx];}} if(fP.length===0)return null; return{positions:new Float32Array(fP),normals:new Float32Array(fN),indices:new Uint32Array(fI),groups:fG};} self.onmessage = function(e){if(e.data.type==='generate'){const{chunkX:x,chunkZ:z,key:k}=e.data;try{const mD=generateChunkGeometryData(x,z);if(mD){self.postMessage({type:'geometry',key:k,geometry:{positions:mD.positions.buffer,normals:mD.normals.buffer,indices:mD.indices.buffer,groups:mD.groups}},[mD.positions.buffer,mD.normals.buffer,mD.indices.buffer]);}else{self.postMessage({type:'empty',key:k});}}catch(err){console.error(\`WrkErr \${k}:\`,err);self.postMessage({type:'error',key:k,message:err.message||'Unk'});}}} `; }
+        function initializeWorkers() { const wc=createWorkerCode();const b=new Blob([wc],{type:'app/js'});const u=URL.createObjectURL(b);for(let i=0;i<NUM_WORKERS;i++){try{const w=new Worker(u);w.onmessage=onWorkerMessage;w.onerror=onWorkerError;workerPool.push(w);workerState.push({available:true,currentChunkKey:null});}catch(e){console.error(`Wrk ${i} FAIL:`,e);}}URL.revokeObjectURL(u);}
+        function findAvailableWorker() { for(let i=0;i<workerPool.length;i++){if(workerState[i].available){return i;}}return -1; }
+        function onWorkerError(error) { console.error('WORKER ERROR:',error.message,error.filename,error.lineno);const wi=workerPool.indexOf(error.target);if(wi!==-1&&!workerState[wi].available){const k=workerState[wi].currentChunkKey;console.error(`Wrk ${wi} fail ${k}`);loadedChunks.set(k,{mesh:null,state:'error'});workerState[wi].available=true;workerState[wi].currentChunkKey=null;activeWorkerJobs=Math.max(0,activeWorkerJobs-1);}else{console.error("Unk worker err/avail err.");if(activeWorkerJobs>0)activeWorkerJobs--;} }
+        function onWorkerMessage(event) { const data=event.data;const wi=workerPool.indexOf(event.target); if(wi!==-1&&!workerState[wi].available){workerState[wi].available=true;workerState[wi].currentChunkKey=null; activeWorkerJobs=Math.max(0,activeWorkerJobs-1);}else{ if(activeWorkerJobs > 0 && data.type !== 'error') activeWorkerJobs--;} const key=data.key; const entry=loadedChunks.get(key); if(!entry||entry.state!=='loading'){return;} if(data.type==='geometry'){try{const d=data.geometry; const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(d.positions),3)); g.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(d.normals),3)); g.setIndex(new THREE.BufferAttribute(new Uint32Array(d.indices),1)); g.groups=d.groups.map(i=>({start:i.start,count:i.count,materialIndex:i.materialIndex})); const m=new THREE.Mesh(g,chunkSharedMaterials); const[x,z]=key.split(',').map(Number); m.position.set(x*CHUNK_SIZE*BLOCK_SIZE,0,z*CHUNK_SIZE*BLOCK_SIZE); m.castShadow=false;m.receiveShadow=false; scene.add(m); loadedChunks.set(key,{mesh:m,state:'loaded'});}catch(e){console.error(`Err Recon Geo ${key}:`,e);loadedChunks.set(key,{mesh:null,state:'error'});}}else if(data.type==='empty'){loadedChunks.set(key,{mesh:null,state:'loaded_empty'});}else if(data.type==='error'){console.error(`Wrk err ${key}:${data.message}`);loadedChunks.set(key,{mesh:null,state:'error'});}else{console.warn("Unk wrk msg:",data.type);}}
+
+        function requestChunkLoad(x, z) {const key=getChunkKey(x,z);if(!loadedChunks.has(key)&&!chunkLoadRequestQueue.includes(key)){chunkLoadRequestQueue.push(key);}}
+        function requestChunkUnload(x, z) {const key=getChunkKey(x,z);if(!chunkUnloadRequestQueue.includes(key)){for(let i=0;i<workerPool.length;i++){if(!workerState[i].available&&workerState[i].currentChunkKey===key){if(loadedChunks.has(key))loadedChunks.delete(key);workerState[i].available=true;workerState[i].currentChunkKey=null;activeWorkerJobs=Math.max(0,activeWorkerJobs-1);return;}}const idx=chunkLoadRequestQueue.indexOf(key);if(idx>-1){chunkLoadRequestQueue.splice(idx,1);return;}chunkUnloadRequestQueue.push(key);}}
+        function getChunkCoord(p){return Math.floor(p/CHUNK_SIZE/BLOCK_SIZE);}function getChunkKey(x,z){return`${x},${z}`;}
+        function unloadChunk(x, z){const key=getChunkKey(x,z);if(loadedChunks.has(key)){const d=loadedChunks.get(key);loadedChunks.delete(key);if(d.mesh){scene.remove(d.mesh);d.mesh.geometry.dispose();}}}
+
+        function generateSpiralCoordinates(cx,cz,r){const c=[];c.push([cx,cz]);let x=0,z=0,dx=0,dz=-1;const mC=r*2+1;for(let i=0;i<mC*mC;i++){let cX=cx+x,cZ=cz+z;if(Math.abs(cX-cx)<=r&&Math.abs(cZ-cz)<=r){if(x!==0||z!==0){c.push([cX,cZ]);}} if(x===z||(x<0&&x===-z)||(x>0&&x===1-z)){const t=dx;dx=-dz;dz=t;} x+=dx;z+=dz;if(Math.max(Math.abs(x),Math.abs(z))>r+1){break;}}return c;}
+        function updateChunks(){const p=controls.getObject().position;const cx=getChunkCoord(p.x);const cz=getChunkCoord(p.z);if(cx===lastChunkX&&cz===lastChunkZ)return;const d=new Set();const s=generateSpiralCoordinates(cx,cz,RENDER_DISTANCE);for(const[x,z]of s){const k=getChunkKey(x,z);d.add(k);requestChunkLoad(x,z);}for(const k of loadedChunks.keys()){if(!d.has(k)){const[x,z]=k.split(',').map(Number);requestChunkUnload(x,z);}}let i=chunkLoadRequestQueue.length;while(i--){if(!d.has(chunkLoadRequestQueue[i])){chunkLoadRequestQueue.splice(i,1);}}chunkLoadRequestQueue.sort((a,b)=>{const[ax,az]=a.split(',').map(Number);const[bx,bz]=b.split(',').map(Number);const dASq=(ax-cx)**2+(az-cz)**2;const dBSq=(bx-bz)**2+(bz-cz)**2;return dASq-dBSq;});lastChunkX=cx;lastChunkZ=cz;}
+        function processChunkQueues(){let u=0;while(chunkUnloadRequestQueue.length>0&&u<MAX_UNLOAD_PER_FRAME){const k=chunkUnloadRequestQueue.shift();const[x,z]=k.split(',').map(Number);unloadChunk(x,z);u++;}let sj=0;while(chunkLoadRequestQueue.length>0&&activeWorkerJobs<MAX_ACTIVE_WORKER_JOBS){let clc=0;loadedChunks.forEach(cd=>{if(cd.state==='loaded'||cd.state==='loaded_empty')clc++;});if(clc>=MAX_LOADED_CHUNKS)break;const wi=findAvailableWorker();if(wi===-1)break;const k=chunkLoadRequestQueue.shift();if(loadedChunks.has(k))continue;const[x,z]=k.split(',').map(Number);workerState[wi].available=false;workerState[wi].currentChunkKey=k;workerPool[wi].postMessage({type:'generate',chunkX:x,chunkZ:z,key:k});loadedChunks.set(k,{mesh:null,state:'loading'});activeWorkerJobs++;sj++;}}
+
+        const _wDir=new THREE.Vector3();const _mInp=new THREE.Vector3();const _hVel=new THREE.Vector3();
+        function updatePlayerMovement(delta){
+            const pObj = controls.getObject();
+            const absoluteMinFeetY = BLOCK_SIZE / 2;
+
+            if(!pointerLocked){
+                playerVelocity.x *= (1 - PLAYER_FRICTION * delta);
+                playerVelocity.z *= (1 - PLAYER_FRICTION * delta);
+                if (!isFlying) {
+                    playerVelocity.y -= GRAVITY * delta;
+                } else {
+                    playerVelocity.y *= (1 - FLY_VERTICAL_FRICTION * delta);
+                }
+                pObj.position.x += playerVelocity.x * delta;
+                pObj.position.z += playerVelocity.z * delta;
+                pObj.position.y += playerVelocity.y * delta;
+
+                if(Math.abs(playerVelocity.x)<0.01) playerVelocity.x=0;
+                if(Math.abs(playerVelocity.z)<0.01) playerVelocity.z=0;
+                if(Math.abs(playerVelocity.y)<0.01 && isFlying) playerVelocity.y=0;
+
+                let effectiveGroundFeetY;
+                if (isFlying) {
+                    effectiveGroundFeetY = absoluteMinFeetY;
+                } else {
+                    const currentTerrainHeight = getTerrainHeight(pObj.position.x, pObj.position.z);
+                    const terrainGroundFeetY = currentTerrainHeight * BLOCK_SIZE + BLOCK_SIZE / 2;
+                    effectiveGroundFeetY = Math.max(terrainGroundFeetY, absoluteMinFeetY);
+                }
+                const effectiveGroundPlayerY = effectiveGroundFeetY + PLAYER_HEIGHT / 2 + GROUND_BUFFER;
+
+                if (pObj.position.y < effectiveGroundPlayerY) {
+                    pObj.position.y = effectiveGroundPlayerY;
+                    if (playerVelocity.y < 0) { playerVelocity.y = 0; }
+                }
+                return;
+            }
+
+            const effMaxSpeed=isFlying?PLAYER_FLY_SPEED:PLAYER_SPEED;
+            const effVSpeed=FLY_VERTICAL_SPEED;
+
+            _mInp.set(0,0,0); pObj.getWorldDirection(_wDir); _wDir.y=0; _wDir.normalize();
+            const _side=new THREE.Vector3().crossVectors(pObj.up,_wDir).normalize();
+            if(movement.forward) _mInp.add(_wDir); if(movement.backward) _mInp.sub(_wDir);
+            if(movement.left) _mInp.add(_side); if(movement.right) _mInp.sub(_side);
+            _mInp.normalize();
+            const preUpdateTerrainHeight = getTerrainHeight(pObj.position.x, pObj.position.z);
+            const preUpdateTerrainGroundFeetY = preUpdateTerrainHeight * BLOCK_SIZE + BLOCK_SIZE / 2;
+            const preUpdateEffectiveGroundFeetY = isFlying ? absoluteMinFeetY : Math.max(preUpdateTerrainGroundFeetY, absoluteMinFeetY);
+            const preUpdateCurrentFeetY = pObj.position.y - PLAYER_HEIGHT / 2;
+            const preUpdateOnGround = !isFlying && (preUpdateCurrentFeetY <= preUpdateEffectiveGroundFeetY + GROUND_BUFFER + 0.01);
+
+            const accel = PLAYER_ACCELERATION * (preUpdateOnGround || isFlying ? 1.0 : 0.4);
+            playerVelocity.x += _mInp.x * accel * delta; playerVelocity.z += _mInp.z * accel * delta;
+            _hVel.set(playerVelocity.x, 0, playerVelocity.z);
+            if (_hVel.lengthSq() > 0) {
+                _hVel.multiplyScalar(Math.max(0, 1 - PLAYER_FRICTION * delta));
+                playerVelocity.x = _hVel.x; playerVelocity.z = _hVel.z;
+                 if (_hVel.lengthSq() < 0.01 * 0.01) { playerVelocity.x = 0; playerVelocity.z = 0; }
+            }
+            _hVel.set(playerVelocity.x, 0, playerVelocity.z);
+            if (_hVel.lengthSq() > effMaxSpeed * effMaxSpeed) {
+                _hVel.normalize().multiplyScalar(effMaxSpeed);
+                playerVelocity.x = _hVel.x; playerVelocity.z = _hVel.z;
+            }
+
+            if (isFlying) {
+                onGround = false; canJump = false;
+                let verticalInput = 0;
+                if (movement.up) verticalInput += 1; if (movement.down) verticalInput -= 1;
+                playerVelocity.y += verticalInput * effVSpeed * 5 * delta;
+                playerVelocity.y *= Math.max(0, 1 - FLY_VERTICAL_FRICTION * delta);
+                const maxFlyVSpeed = effVSpeed;
+                if (Math.abs(playerVelocity.y) > maxFlyVSpeed) { playerVelocity.y = Math.sign(playerVelocity.y) * maxFlyVSpeed; }
+                if (Math.abs(playerVelocity.y) < 0.1 && verticalInput === 0) { playerVelocity.y = 0; }
+            } else {
+                const currentTerrainHeight = getTerrainHeight(pObj.position.x, pObj.position.z);
+                const terrainGroundFeetY = currentTerrainHeight * BLOCK_SIZE + BLOCK_SIZE / 2;
+                const effectiveGroundFeetY = Math.max(terrainGroundFeetY, absoluteMinFeetY);
+                const currentFeetY = pObj.position.y - PLAYER_HEIGHT / 2;
+                onGround = currentFeetY <= effectiveGroundFeetY + GROUND_BUFFER + 0.01;
+
+                playerVelocity.y -= GRAVITY * delta;
+
+                if (onGround && playerVelocity.y < 0) {
+                     canJump = true;
+                } else if (!onGround) {
+                     canJump = false;
+                }
+
+                if (movement.up && canJump && onGround) {
+                    playerVelocity.y = JUMP_VELOCITY;
+                    onGround = false;
+                    canJump = false;
+                }
+            }
+
+            pObj.position.x += playerVelocity.x * delta;
+            pObj.position.z += playerVelocity.z * delta;
+            pObj.position.y += playerVelocity.y * delta;
+
+            let finalEffectiveGroundFeetY;
+            if (isFlying) {
+                finalEffectiveGroundFeetY = absoluteMinFeetY;
+            } else {
+                const finalTerrainHeight = getTerrainHeight(pObj.position.x, pObj.position.z);
+                const finalTerrainGroundFeetY = finalTerrainHeight * BLOCK_SIZE + BLOCK_SIZE / 2;
+                finalEffectiveGroundFeetY = Math.max(finalTerrainGroundFeetY, absoluteMinFeetY);
+            }
+
+            const finalTargetPlayerY = finalEffectiveGroundFeetY + PLAYER_HEIGHT / 2 + (isFlying ? 0 : GROUND_BUFFER);
+            const finalCurrentPlayerY = pObj.position.y;
+
+
+            if (finalCurrentPlayerY < finalTargetPlayerY) {
+                pObj.position.y = finalTargetPlayerY;
+                if (playerVelocity.y < 0) { playerVelocity.y = 0; }
+
+                if (!isFlying) {
+                    onGround = true;
+                    canJump = true;
+                }
+            } else {
+                 if (!isFlying) {
+                     const finalCurrentFeetY = pObj.position.y - PLAYER_HEIGHT / 2;
+                     onGround = (finalCurrentFeetY <= finalEffectiveGroundFeetY + GROUND_BUFFER + 0.01);
+                     canJump = onGround;
+                 }
+            }
+        }
+
+        const _tempSkyColor = new THREE.Color();
+        function updateDayNightCycle(delta) {
+            sunAngle += DAY_CYCLE_SPEED * delta;
+            sunAngle %= (Math.PI * 2);
+
+            const sunY = Math.sin(sunAngle);
+            const sunZ = Math.cos(sunAngle);
+            directionalLight.position.set(0.8, sunY, sunZ).normalize();
+
+            const rawIntensity = Math.max(0, sunY);
+            const intensityFactor = MIN_LIGHT_INTENSITY_FACTOR + (1.0 - MIN_LIGHT_INTENSITY_FACTOR) * rawIntensity;
+
+            directionalLight.intensity = BASE_DIR_LIGHT_INTENSITY * intensityFactor;
+            hemisphereLight.intensity = BASE_HEMI_LIGHT_INTENSITY * (MIN_LIGHT_INTENSITY_FACTOR * 0.8 + (1.0 - MIN_LIGHT_INTENSITY_FACTOR * 0.8) * Math.max(0, sunY * 0.6 + 0.4));
+
+            const nightLerp = Math.max(0, Math.min(1, (0.3 - sunY) / 0.6));
+            _tempSkyColor.lerpColors(BASE_SKY_COLOR, NIGHT_SKY_COLOR, nightLerp);
+            scene.background.set(_tempSkyColor);
+            scene.fog.color.set(_tempSkyColor);
+        }
+
+        function updateInfo(currentTime){frameCounter++;const elapsed=currentTime-lastFrameTime;if(elapsed>=1000){fps=(frameCounter*1000)/elapsed;frameCounter=0;lastFrameTime=currentTime;const info=document.getElementById('info');const p=controls.getObject().position;const mode=isFlying?"Fly":"Walk";const gStatus=onGround?"Ground":(isFlying?"Flying":"Air");let lc=0,ldingc=0;loadedChunks.forEach(cd=>{if(cd.state==='loaded'||cd.state==='loaded_empty')lc++;else if(cd.state==='loading')ldingc++;}); const sunDeg = (sunAngle * 180 / Math.PI).toFixed(0); info.innerHTML=`Mode:${mode}|${gStatus}|Sun:${sunDeg}°<br>Pos:(${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)})|Chk:${lastChunkX},${lastChunkZ}<br>FPS:${fps.toFixed(1)}|Chunks:${lc}(${ldingc})/${MAX_LOADED_CHUNKS}|LQ:${chunkLoadRequestQueue.length}|UQ:${chunkUnloadRequestQueue.length}|Work:${activeWorkerJobs}/${NUM_WORKERS}`;}}
+
+        const clock=new THREE.Clock();function animate(time){requestAnimationFrame(animate);const delta=Math.min(clock.getDelta(),0.1); updatePlayerMovement(delta); updateDayNightCycle(delta); updateChunks();processChunkQueues();updateInfo(performance.now());renderer.render(scene,camera);}
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function init(){
+            console.log("Initializing VibeCraft...");
+            window.addEventListener('resize', onWindowResize); // Add resize listener
+            initializeWorkers();
+            const sP = controls.getObject().position;
+            lastChunkX = Infinity; lastChunkZ = Infinity;
+            const startCX = getChunkCoord(sP.x); const startCZ = getChunkCoord(sP.z);
+            updateChunks();
+            lastFrameTime = performance.now();
+            animate(lastFrameTime);
+        }
+        init();
+
+    });
+    </script>
+</body>
+</html>
